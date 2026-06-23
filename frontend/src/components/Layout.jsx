@@ -2,6 +2,7 @@ import { Link, useLocation } from 'react-router-dom'
 
 const links = [
   { to: '/', label: 'Dashboard' },
+  { to: '/signal', label: 'Señal en Vivo' },
   { to: '/trades', label: 'Diario' },
   { to: '/trades/create', label: '+ Nuevo Trade' },
 ]

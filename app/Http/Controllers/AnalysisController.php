@@ -96,6 +96,130 @@ class AnalysisController extends Controller
         ]);
     }
 
+    public function signal(Request $request)
+    {
+        $request->validate([
+            'pair' => 'required|string|max:10',
+        ]);
+
+        $pair = $request->pair;
+        $yhCode = $this->toYahooCode($pair);
+
+        $h1 = $this->fetchOHLC($yhCode, '1h', 120);
+        if (!$h1) {
+            return response()->json(['error' => 'No se pudieron obtener datos'], 502);
+        }
+
+        $currentPrice = end($h1)['close'];
+
+        $sweepBuy = $this->detectLiquiditySweep($h1, 'buy');
+        $sweepSell = $this->detectLiquiditySweep($h1, 'sell');
+        $bos = $this->detectBreakOfStructure($h1);
+        $ob = $this->detectOrderBlock($h1);
+        $fvg = $this->detectFVG($h1);
+        $snr = $this->detectSupportResistance($h1);
+        $tendency = $this->detectTendency($h1);
+
+        $buyFactors = [];
+        $sellFactors = [];
+
+        // Classify sweep by detail message
+        $sweepBuyUsed = false;
+        $sweepSellUsed = false;
+
+        if ($sweepBuy['detected']) {
+            $isBuy = str_contains($sweepBuy['detail'], 'alcista');
+            $factor = ['key' => 'sweep', 'label' => 'Barrida de Liquidez (1H)', 'detail' => $sweepBuy['detail']];
+            if ($isBuy) {
+                $buyFactors[] = $factor;
+                $sweepBuyUsed = true;
+            } else {
+                $sellFactors[] = $factor;
+                $sweepSellUsed = true;
+            }
+        }
+
+        if ($sweepSell['detected']) {
+            $isBuy = str_contains($sweepSell['detail'], 'alcista');
+            $factor = ['key' => 'sweep', 'label' => 'Barrida de Liquidez (1H)', 'detail' => $sweepSell['detail']];
+            if ($isBuy && !$sweepBuyUsed) {
+                $buyFactors[] = $factor;
+            } elseif (!$isBuy && !$sweepSellUsed) {
+                $sellFactors[] = $factor;
+            }
+        }
+
+        if ($bos['detected']) {
+            $isBullish = str_contains($bos['detail'], 'alcista');
+            $factor = ['key' => 'bos', 'label' => 'Ruptura de Estructura (1H)', 'detail' => $bos['detail']];
+            if ($isBullish) $buyFactors[] = $factor;
+            else $sellFactors[] = $factor;
+        }
+
+        if ($ob['detected']) {
+            $isBullish = str_contains($ob['detail'], 'alcista');
+            $factor = ['key' => 'orderblock', 'label' => 'Order Block / Zona de Oferta', 'detail' => $ob['detail']];
+            if ($isBullish) $buyFactors[] = $factor;
+            else $sellFactors[] = $factor;
+        }
+
+        if ($fvg['detected']) {
+            $isBullish = str_contains($fvg['detail'], 'alcista');
+            $factor = ['key' => 'fvg', 'label' => 'Desequilibrio / FVG', 'detail' => $fvg['detail']];
+            if ($isBullish) $buyFactors[] = $factor;
+            else $sellFactors[] = $factor;
+        }
+
+        $buyScore = count($buyFactors);
+        $sellScore = count($sellFactors);
+
+        $signal = 'neutral';
+        $action = null;
+        $message = '';
+
+        if ($buyScore >= $sellScore + 2 && $buyScore >= 1) {
+            $signal = 'buy';
+            $action = 'compra';
+            $message = 'Señal de COMPRA detectada. El mercado muestra estructura alcista. Revisa el RR antes de entrar.';
+        } elseif ($sellScore >= $buyScore + 2 && $sellScore >= 1) {
+            $signal = 'sell';
+            $action = 'venta';
+            $message = 'Señal de VENTA detectada. El mercado muestra estructura bajista. Revisa el RR antes de entrar.';
+        } else {
+            $message = 'No hay un setup claro en este momento. No es recomendable entrar sin factores de confluencia sólidos.';
+        }
+
+        $winningScore = max($buyScore, $sellScore);
+        if ($winningScore >= 3) $confidence = 'alta';
+        elseif ($winningScore >= 2) $confidence = 'media';
+        else $confidence = 'baja';
+
+        $allFactors = array_merge($buyFactors, $sellFactors);
+        $totalFactors = count($allFactors);
+
+        $riskAnalysis = null;
+        if ($signal !== 'neutral') {
+            $riskAnalysis = $this->calculateRiskAnalysis($pair, $currentPrice, $signal, $h1);
+        }
+
+        return response()->json([
+            'pair' => $pair,
+            'current_price' => $currentPrice,
+            'signal' => $signal,
+            'action' => $action,
+            'confidence' => $confidence,
+            'buy_score' => $buyScore,
+            'sell_score' => $sellScore,
+            'buy_factors' => $buyFactors,
+            'sell_factors' => $sellFactors,
+            'total_factors' => $totalFactors,
+            'tendency' => $tendency,
+            'risk_analysis' => $riskAnalysis,
+            'session' => $this->detectSession(),
+            'message' => $message,
+        ]);
+    }
+
     public function session()
     {
         return response()->json($this->detectSession());

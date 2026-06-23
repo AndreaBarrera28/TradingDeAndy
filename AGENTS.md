@@ -219,7 +219,7 @@ TradingDeAndy/
 │   │   ├── Controllers/
 │   │   │   ├── Controller.php        # Clase base abstracta
 │   │   │   ├── TradeController.php   # CRUD + stats + prices
-│   │   │   ├── AnalysisController.php # Análisis técnico ICT + RR + detección de sesión NY
+│   │   │   ├── AnalysisController.php # Análisis técnico ICT + RR + detección de sesión NY + señales en vivo
 │   │   │   └── SettingsController.php # Config de riesgo (balance, %)
 │   │   └── Middleware/
 │   │       └── HandleInertiaRequests.php
@@ -242,6 +242,7 @@ TradingDeAndy/
 │       ├── components/Layout.jsx
 │       ├── pages/
 │       │   ├── Dashboard.jsx
+│       │   ├── Signal.jsx
 │       │   └── Trades/
 │       │       ├── Index.jsx
 │       │       └── Create.jsx

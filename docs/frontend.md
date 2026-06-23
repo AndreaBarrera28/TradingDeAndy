@@ -70,6 +70,7 @@ const api = axios.create({ baseURL: '/api' })
 | `getSettings()` | GET | `/api/settings` |
 | `updateSettings(data)` | PUT | `/api/settings` |
 | `getSession()` | GET | `/api/session` |
+| `getSignal(pair)` | GET | `/api/signal?pair={pair}` |
 
 Todas devuelven `response.data` (promesa resuelta).
 
@@ -118,6 +119,15 @@ Todas devuelven `response.data` (promesa resuelta).
 - Botón "+ resultado" inline para cerrar trades
 - Formulario de cierre inline: precio salida, resultado (win/loss/breakeven), pips
 - Ordenado por fecha descendente
+
+#### Signal (`pages/Signal.jsx`)
+- **Selector de par:** Dropdown con 9 pares Forex + botón "Obtener Señal"
+- **Badge de señal:** COMPRA (📈 verde), VENTA (📉 rojo), o SIN SETUP (⏸️ gris) con nivel de confianza (alta/media/baja)
+- **Mensaje contextual:** Explica el veredicto de la señal
+- **Factores por bias:** Dos columnas (alcistas/bajistas) con los factores detectados en cada dirección
+- **Análisis de Riesgo:** SL/TP estimado, lote sugerido, ratio RR (solo si hay señal clara)
+- **Sesión NY:** Banner informativo de la sesión actual
+- **Sin navegación interna:** Página autónoma, los datos se refrescan con cada clic en "Obtener Señal"
 
 #### Trade Create (`pages/Trades/Create.jsx`)
 - **Formulario completo con:**

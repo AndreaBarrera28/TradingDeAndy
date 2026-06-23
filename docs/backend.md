@@ -180,6 +180,20 @@ Flujo:
 
 **Incluido en `detect()`:** la respuesta de `/api/analyze` ahora incluye `session` en el JSON de respuesta.
 
+#### Método `signal(Request)`
+
+**Endpoint:** `GET /api/signal?pair=EURUSD`
+
+Analiza el mercado sin requerir dirección. Detecta factores por separado para compra y venta, y determina el bias del mercado.
+
+Flujo:
+1. Recibe solo el par a analizar
+2. Obtiene 120 velas de 1 hora desde Yahoo Finance
+3. Ejecuta los 5 detectores clasificando cada factor como alcista o bajista
+4. Si alcistas ≥ bajistas + 2 → señal buy; si bajistas ≥ alcistas + 2 → señal sell; si no → neutral
+5. Calcula RR y SL/TP sugerido solo si hay señal clara
+6. Retorna factores separados por bias, confianza y mensaje contextual
+
 **Cálculo de riesgo:**
 1. Toma el saldo y % de riesgo del usuario
 2. Determina SL y TP basados en soportes/resistencias más cercanos

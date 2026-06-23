@@ -39,3 +39,7 @@ export function updateSettings(data) {
 export function getSession() {
   return api.get('/session').then(r => r.data)
 }
+
+export function getSignal(pair) {
+  return api.get('/signal', { params: { pair } }).then(r => r.data)
+}

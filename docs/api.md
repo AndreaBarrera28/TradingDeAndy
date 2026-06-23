@@ -388,6 +388,66 @@ Mismos campos que `session` en el análisis técnico. Independiente para usar en
 
 ---
 
+### 9. Señal en Vivo
+
+```
+GET /api/signal?pair=EURUSD
+```
+
+**Parámetros:**
+| Parámetro | Tipo | Obligatorio | Descripción |
+|-----------|------|-------------|-------------|
+| pair | string | ✅ | Par Forex (ej: EURUSD) |
+
+Analiza el mercado en tiempo real sin necesidad de especificar dirección. Detecta factores alcistas y bajistas por separado y determina la señal predominante.
+
+**Lógica de bias:**
+- Si factores alcistas ≥ factores bajistas + 2 → señal de **compra**
+- Si factores bajistas ≥ factores alcistas + 2 → señal de **venta**
+- Si no hay diferencia suficiente → **sin setup claro**
+
+**Respuesta (200):**
+```json
+{
+  "pair": "EURUSD",
+  "current_price": 1.12345,
+  "signal": "buy",
+  "action": "compra",
+  "confidence": "alta",
+  "buy_score": 3,
+  "sell_score": 1,
+  "buy_factors": [
+    {"key": "sweep", "label": "Barrida de Liquidez (1H)", "detail": "Barrida de mínimo... → posible reversión alcista"},
+    {"key": "bos", "label": "Ruptura de Estructura (1H)", "detail": "Estructura alcista: mínimos ascendentes"},
+    {"key": "fvg", "label": "Desequilibrio / FVG", "detail": "FVG alcista: gap de ..."}
+  ],
+  "sell_factors": [...],
+  "total_factors": 3,
+  "tendency": {"direction": "alcista", "strength": "fuerte"},
+  "risk_analysis": { ... },
+  "session": { ... },
+  "message": "Señal de COMPRA detectada. El mercado muestra estructura alcista. Revisa el RR antes de entrar."
+}
+```
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| signal | string | `buy`, `sell`, o `neutral` |
+| action | string/null | `compra`, `venta`, o null si neutral |
+| confidence | string | `alta` (≥3), `media` (2), `baja` (1) |
+| buy_score | int | Factores alcistas detectados |
+| sell_score | int | Factores bajistas detectados |
+| buy_factors | array | Factores que soportan compra |
+| sell_factors | array | Factores que soportan venta |
+| risk_analysis | object/null | RR, SL/TP sugerido (solo si hay señal clara) |
+
+**Error (502):**
+```json
+{
+  "error": "No se pudieron obtener datos"
+}
+```
+
 ## Manejo de Errores
 
 Todas las rutas devuelven JSON. Las excepciones se renderizan como JSON automáticamente para peticiones a `/api/*` (configurado en `bootstrap/app.php`).
