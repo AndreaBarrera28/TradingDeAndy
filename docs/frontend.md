@@ -66,7 +66,10 @@ const api = axios.create({ baseURL: '/api' })
 | `createTrade(data)` | POST | `/api/trades` |
 | `updateTrade(id, data)` | PUT | `/api/trades/{id}` |
 | `getPrices()` | GET | `/api/prices` |
-| `analyzePair(pair)` | GET | `/api/analyze?pair={pair}` |
+| `analyzePair(pair, direction?)` | GET | `/api/analyze?pair={pair}&direction={direction}` |
+| `getSettings()` | GET | `/api/settings` |
+| `updateSettings(data)` | PUT | `/api/settings` |
+| `getSession()` | GET | `/api/session` |
 
 Todas devuelven `response.data` (promesa resuelta).
 
@@ -92,6 +95,12 @@ Todas devuelven `response.data` (promesa resuelta).
 - Fondo gray-950, texto gray-100
 
 #### Dashboard (`pages/Dashboard.jsx`)
+- **Configuración de Riesgo:** Sección superior para ingresar saldo de cuenta y porcentaje de riesgo por entrada
+  - Input de saldo ($) con step 0.01
+  - Input de % de riesgo con step 0.1
+  - Botón Guardar que persiste vía API (`PUT /api/settings`)
+  - Muestra el riesgo máximo calculado en dólares
+  - Autocarga los valores guardados al montar el componente
 - 4 tarjetas de métricas principales:
   - Entradas Registradas (total)
   - Efectividad Promedio (avg_confluence / 8)
@@ -101,6 +110,7 @@ Todas devuelven `response.data` (promesa resuelta).
 - **Con datos:** Muestra:
   - Barras de distribución de efectividad (Alta/Media/Baja)
   - Tarjetas de trades en análisis y win rate detallado (W/L/BE)
+- **Sesión NY:** Banner persistente entre la configuración de riesgo y las métricas. Muestra si NY está activa, cerrada, o es fin de semana. Consulta `GET /api/session` al montar el componente.
 
 #### Trades Index (`pages/Trades/Index.jsx`)
 - Tabla con columnas: Fecha, Par, Dirección, Entrada, SL/TP, Efectividad, Resultado
@@ -126,9 +136,19 @@ Todas devuelven `response.data` (promesa resuelta).
   - Llama a `getPrices()` al montar el componente
   - Muestra precio actual del par seleccionado
   - Botón para copiar precio actual a entrada/SL/TP
+- **Análisis de Riesgo (RR):** Al detectar confluencias, el sistema ahora devuelve `risk_analysis` con:
+  - **SL Sugerido:** Basado en soporte/resistencia más cercano, con distancia en pips
+  - **TP Sugerido:** Basado en soporte/resistencia más cercano, con distancia en pips
+  - **Lote Sugerido:** Calculado para arriesgar exactamente el % configurado del saldo
+  - **Ratio RR:** Risk/Reward ratio (1:2.5, 1:1.2, etc.)
+  - **Veredicto:** EXCELENTE (≥2.0), BUENA (≥1.5), REGULAR (≥1.0), MALA (<1.0)
+  - Los valores de SL, TP y lote se auto-rellenan en el formulario
+  - Se reinicia el análisis si cambia el par o la dirección
 - **Auto-detección:**
-  - Llama a `analyzePair()` con el par seleccionado
-  - Llena automáticamente factores y notas
+  - Llama a `analyzePair()` con el par y la dirección seleccionada
+  - Llena automáticamente factores, notas, SL, TP y lote sugerido
+  - Muestra banner de sesión NY (verde si activa, rojo si cerrada, amarillo si próxima a cerrar)
+- **Sesión NY:** Datos obtenidos de `result.session` en la respuesta de análisis. Mensaje contextual y hora ET.
 
 ### Temas y Estilos
 

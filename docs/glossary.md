@@ -64,6 +64,21 @@ Términos y conceptos utilizados en el proyecto TradingDeAndy.
 
 ---
 
+## Términos de Gestión de Riesgo
+
+| Término | Definición |
+|---------|-----------|
+| **Account Balance** | Saldo actual de la cuenta de trading. Configurable en el Dashboard. |
+| **Risk Percentage** | Porcentaje del saldo que se arriesga por operación. Por defecto 1%. |
+| **Max Risk Amount** | Monto máximo a arriesgar en dólares. Calculado como `balance × (risk% / 100)`. |
+| **Lot Size** | Volumen de la operación. El sistema sugiere un lote que arriesgue exactamente el porcentaje configurado. |
+| **Pip Value** | Valor en dólares de 1 pip para 1 lote estándar. Varía según el par (~$10 para la mayoría). |
+| **RR Ratio (Risk/Reward)** | Relación entre la ganancia potencial y la pérdida potencial. RR = TP_pips / SL_pips. |
+| **Veredicto** | Evaluación del RR: excelente (≥2.0), buena (≥1.5), regular (≥1.0), mala (<1.0). |
+| **Position Sizing** | Cálculo del tamaño de posición (lote) para arriesgar exactamente el % deseado del saldo. |
+
+---
+
 ## Términos de la Aplicación
 
 | Término | Definición |

@@ -129,6 +129,15 @@ Corrige `exit_price` para que acepte NULL (estaba como NOT NULL inicialmente).
 ALTER TABLE trades MODIFY exit_price DECIMAL(14,5) NULL;
 ```
 
+### 9. `2026_06_22_000001_add_account_settings_to_users.php`
+
+Añade configuración de riesgo a la tabla `users`.
+
+| Columna | Tipo | Restricciones |
+|---------|------|---------------|
+| account_balance | decimal(14,2) | DEFAULT 0 |
+| risk_percentage | decimal(5,2) | DEFAULT 1.00 |
+
 ---
 
 ## Modelo Trade: Casts y Fillable

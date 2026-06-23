@@ -107,7 +107,12 @@ Realiza análisis técnico automático usando datos de Yahoo Finance.
 
 #### Método `detect(Request)`
 
-**Endpoint:** `GET /api/analyze?pair=EURUSD`
+**Endpoint:** `GET /api/analyze?pair=EURUSD&direction=buy`
+
+**Nuevo parámetro opcional:**
+| Parámetro | Tipo | Descripción |
+|-----------|------|-------------|
+| `direction` | string | `buy` o `sell`. Filtra detección de barridas y calcula RR orientado a la dirección. |
 
 Flujo:
 1. Recibe el par a analizar
@@ -161,6 +166,28 @@ Flujo:
 - Filtra clusters con al menos 3 toques
 - Encuentra el nivel S/R más cercano al precio actual (dentro de 1%)
 
+#### Métodos privados de RR
+
+| Método | Descripción |
+|--------|-------------|
+| `calculateRiskAnalysis(pair, currentPrice, direction, candles)` | Calcula SL/TP sugerido, pips, lote basado en 1% de riesgo, ratio RR y veredicto. |
+| `pipsBetween(price1, price2, pair)` | Calcula distancia en pips entre dos precios según el par. |
+| `estimatePipValue(pair, currentPrice)` | Estima el valor en dólares por pip para 1 lote estándar. |
+| `verdictLabel(verdict)` | Retorna label, color y mensaje para cada veredicto (excelente/buena/regular/mala). |
+| `detectSession()` | Detecta sesión de Nueva York (8-17 ET, lun-vie). Retorna sesiones activas, status, hora ET, alerta y mensaje contextual. |
+
+**Nuevo endpoint:** `GET /api/session` — `AnalysisController::session()`, retorna mismo array que `detectSession()`. Independiente del análisis técnico.
+
+**Incluido en `detect()`:** la respuesta de `/api/analyze` ahora incluye `session` en el JSON de respuesta.
+
+**Cálculo de riesgo:**
+1. Toma el saldo y % de riesgo del usuario
+2. Determina SL y TP basados en soportes/resistencias más cercanos
+3. Calcula distancia en pips entre precio actual y SL/TP
+4. Calcula lote sugerido: `riesgo_máximo / (pips_SL * valor_pip)`
+5. Evalúa RR = TP_pips / SL_pips
+6. Veredicto: ≥2.0 excelente, ≥1.5 buena, ≥1.0 regular, <1.0 mala
+
 #### Tendencia
 
 Calcula SMA5 y SMA20 de las últimas 20 velas:
@@ -201,11 +228,20 @@ class Trade extends Model
 
 ### User (`app/Models/User.php`)
 
-Modelo estándar de Laravel con:
-- Fillable: `name`, `email`, `password`
+Modelo estándar de Laravel con campos adicionales para gestión de riesgo:
+- Fillable: `name`, `email`, `password`, `account_balance`, `risk_percentage`
 - Hidden: `password`, `remember_token`
-- Casts: `email_verified_at` → datetime, `password` → hashed
+- Casts: `email_verified_at` → datetime, `password` → hashed, `account_balance` → decimal:2, `risk_percentage` → decimal:2
 - Traits: `HasFactory`, `Notifiable`
+
+### SettingsController (`app/Http/Controllers/SettingsController.php`)
+
+Controlador para gestionar la configuración de riesgo del usuario.
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| `show()` | `GET /api/settings` | Obtiene saldo y % de riesgo. Crea usuario si no existe. |
+| `update(Request)` | `PUT /api/settings` | Guarda `account_balance` y `risk_percentage`. |
 
 ## Configuración Destacada
 

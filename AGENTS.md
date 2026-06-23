@@ -35,6 +35,7 @@ TradingDeAndy es un **trading journal** (bitácora de operaciones) para traders 
 | Laravel Sanctum | ^4.0 | Autenticación de API |
 | Laravel Tinker | ^3.0 | REPL interactivo |
 | Inertia Laravel | * | Frontend Inertia |
+| SettingsController | — | Gestión de saldo y % de riesgo |
 | MySQL | 8+ | Base de datos (local) |
 | SQLite | — | Base de datos (por defecto/testing) |
 
@@ -218,7 +219,8 @@ TradingDeAndy/
 │   │   ├── Controllers/
 │   │   │   ├── Controller.php        # Clase base abstracta
 │   │   │   ├── TradeController.php   # CRUD + stats + prices
-│   │   │   └── AnalysisController.php # Análisis técnico ICT
+│   │   │   ├── AnalysisController.php # Análisis técnico ICT + RR + detección de sesión NY
+│   │   │   └── SettingsController.php # Config de riesgo (balance, %)
 │   │   └── Middleware/
 │   │       └── HandleInertiaRequests.php
 │   ├── Models/

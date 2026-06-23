@@ -190,7 +190,43 @@ GET /api/stats
 
 ---
 
-### 5. Precios en Vivo
+### 5. Configuración de Riesgo
+
+```
+GET /api/settings
+```
+
+**Respuesta (200):**
+```json
+{
+  "account_balance": 5000.00,
+  "risk_percentage": 1.0
+}
+```
+
+```
+PUT /api/settings
+```
+
+**Body:**
+```json
+{
+  "account_balance": 5000.00,
+  "risk_percentage": 1.0
+}
+```
+
+**Validaciones:**
+| Campo | Tipo | Reglas |
+|-------|------|--------|
+| account_balance | numeric | required, min:0 |
+| risk_percentage | numeric | required, min:0.01, max:100 |
+
+**Respuesta (200):** Los valores guardados.
+
+---
+
+### 6. Precios en Vivo
 
 ```
 GET /api/prices
@@ -221,18 +257,19 @@ GET /api/prices
 
 ---
 
-### 6. Análisis Técnico
+### 7. Análisis Técnico
 
 ```
-GET /api/analyze?pair=EURUSD
+GET /api/analyze?pair=EURUSD&direction=buy
 ```
 
 **Parámetros:**
 | Parámetro | Tipo | Obligatorio | Descripción |
 |-----------|------|-------------|-------------|
 | pair | string | ✅ | Par Forex (ej: EURUSD) |
+| direction | string | ❌ | `buy` o `sell` (filtra detección y calcula RR orientado) |
 
-**Respuesta (200):**
+**Respuesta (200) — incluye `risk_analysis`:**
 ```json
 {
   "pair": "EURUSD",
@@ -242,35 +279,55 @@ GET /api/analyze?pair=EURUSD
     "strength": "fuerte"
   },
   "score": 3,
-  "factors": [
-    {
-      "key": "sweep",
-      "label": "Barrida de Liquidez (1H)",
-      "detail": "Barrida de máximo 1.12450 → reversión bajista"
-    },
-    {
-      "key": "bos",
-      "label": "Ruptura de Estructura (1H)",
-      "detail": "Estructura alcista: mínimos ascendentes"
-    },
-    {
-      "key": "fvg",
-      "label": "Desequilibrio / FVG",
-      "detail": "FVG alcista: gap de 1.12200 a 1.12250"
-    }
-  ],
+  "factors": [...],
   "total_factors": 3,
-  "recent_candles": [
-    {
-      "time": 1687000000,
-      "open": 1.12300,
-      "high": 1.12350,
-      "low": 1.12280,
-      "close": 1.12330
+  "recent_candles": [...],
+  "risk_analysis": {
+    "suggested_sl": 1.12000,
+    "suggested_tp": 1.12600,
+    "sl_pips": 34.5,
+    "tp_pips": 25.5,
+    "sl_reason": "Basado en soporte más cercano",
+    "tp_reason": "Basado en resistencia más cercana",
+    "rr_ratio": 0.74,
+    "suggested_lot_size": 0.15,
+    "account_balance": 5000.0,
+    "risk_percentage": 1.0,
+    "max_risk_amount": 50.0,
+    "verdict": "mala",
+    "verdict_label": {
+      "label": "MALA",
+      "color": "text-red-400",
+      "bg": "bg-red-900/30",
+      "msg": "RR desfavorable. Mejor esperar una mejor entrada."
     }
-  ]
+  }
 }
 ```
+
+| Campo risk_analysis | Tipo | Descripción |
+|---------------------|------|-------------|
+| suggested_sl | float | Stop loss sugerido basado en estructura |
+| suggested_tp | float | Take profit sugerido basado en estructura |
+| sl_pips | float | Distancia en pips del SL |
+| tp_pips | float | Distancia en pips del TP |
+| sl_reason | string | Explicación del SL |
+| tp_reason | string | Explicación del TP |
+| rr_ratio | float | Ratio riesgo/beneficio (TP/SL) |
+| suggested_lot_size | float | Lote calculado para arriesgar 1% del saldo |
+| account_balance | float/null | Saldo configurado (null si no hay) |
+| risk_percentage | float | Porcentaje de riesgo configurado |
+| max_risk_amount | float/null | Monto máximo a arriesgar en $ |
+| verdict | string | `excelente`, `buena`, `regular`, `mala` |
+| verdict_label | object | Label, color y mensaje para mostrar en UI |
+
+**Veredictos:**
+| RR Ratio | Veredicto | Mensaje |
+|----------|-----------|---------|
+| ≥ 2.0 | EXCELENTE | RR muy favorable |
+| ≥ 1.5 | BUENA | RR aceptable |
+| ≥ 1.0 | REGULAR | RR 1:1 o inferior |
+| < 1.0 | MALA | RR desfavorable |
 
 **Error (502):**
 ```json
@@ -281,7 +338,53 @@ GET /api/analyze?pair=EURUSD
 
 **Score:** Se calcula como el número de factores detectados (máximo 8).
 
+**Campo `session` añadido a la respuesta:**
+```json
+"session": {
+  "current_sessions": ["Nueva York", "Londres"],
+  "in_ny_session": true,
+  "is_weekend": false,
+  "ny_status": "activa",
+  "hour_et": 10,
+  "message": "🗽 Sesión de Nueva York ACTIVA — Buen trading. Te quedan 7 horas de sesión.",
+  "alert": "ny_active"
+}
+```
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| current_sessions | array | Sesiones activas actualmente (Asiática, Londres, Nueva York) |
+| in_ny_session | bool | True si estamos en horario NY (8:00-17:00 ET, lun-vie) |
+| is_weekend | bool | True si es sábado o domingo |
+| ny_status | string | `activa`, `cerrada` |
+| hour_et | int | Hora actual en ET (0-23) |
+| message | string | Mensaje contextual según alerta |
+| alert | string | `ny_open`, `ny_active`, `ny_close`, `no_ny`, `warning` |
+
 **Fuente:** Yahoo Finance API (`query1.finance.yahoo.com/v8/finance/chart`).
+
+---
+
+### 8. Sesión de Nueva York
+
+```
+GET /api/session
+```
+
+**Respuesta (200):**
+```json
+{
+  "current_sessions": ["Nueva York", "Londres"],
+  "in_ny_session": true,
+  "is_weekend": false,
+  "ny_status": "activa",
+  "hour_et": 10,
+  "message": "🗽 Sesión de Nueva York ACTIVA — Buen trading. Te quedan 7 horas de sesión.",
+  "alert": "ny_active"
+}
+```
+
+Mismos campos que `session` en el análisis técnico. Independiente para usar en Dashboard. Se basa en la hora del servidor convertida a America/New_York.
 
 ---
 

@@ -125,6 +125,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('stats', [TradeController::class, 'stats']);
     Route::get('prices', [TradeController::class, 'prices']);
     Route::get('analyze', [AnalysisController::class, 'detect']);
+    Route::get('settings', [SettingsController::class, 'show']);
+    Route::put('settings', [SettingsController::class, 'update']);
 });
 ```
 

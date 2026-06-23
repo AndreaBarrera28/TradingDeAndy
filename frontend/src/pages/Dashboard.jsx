@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import Layout from '../components/Layout'
-import { getStats } from '../api/trades'
+import { getStats, getSettings, updateSettings, getSession } from '../api/trades'
 
 const cards = [
   { key: 'total', label: 'Entradas Registradas', color: 'text-blue-400' },
@@ -12,17 +12,105 @@ const cards = [
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null)
+  const [balance, setBalance] = useState('')
+  const [riskPct, setRiskPct] = useState('1.0')
+  const [settingsSaved, setSettingsSaved] = useState(false)
+  const [savingSettings, setSavingSettings] = useState(false)
+  const [session, setSession] = useState(null)
 
   useEffect(() => {
     getStats().then(setStats)
+    getSettings().then(s => {
+      setBalance(s.account_balance ? String(s.account_balance) : '')
+      setRiskPct(String(s.risk_percentage))
+    })
+    getSession().then(setSession)
   }, [])
 
-  const highConfidence = stats ? Math.round((stats.wins / Math.max(stats.total, 1)) * 100) : 0
+  async function handleSaveSettings() {
+    setSavingSettings(true)
+    try {
+      await updateSettings({
+        account_balance: parseFloat(balance) || 0,
+        risk_percentage: parseFloat(riskPct) || 1.0,
+      })
+      setSettingsSaved(true)
+      setTimeout(() => setSettingsSaved(false), 2500)
+    } catch { alert('Error al guardar configuración') }
+    setSavingSettings(false)
+  }
 
   return (
     <Layout>
       <div className="space-y-6">
         <h1 className="text-3xl font-bold">Dashboard de Efectividad</h1>
+
+        <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
+          <h2 className="text-lg font-semibold mb-3">Configuración de Riesgo</h2>
+          <div className="flex items-end gap-4">
+            <div className="flex-1">
+              <label className="block text-sm text-gray-400 mb-1">Saldo de la Cuenta ($)</label>
+              <input type="number" step="0.01" min="0" value={balance}
+                onChange={e => setBalance(e.target.value)}
+                placeholder="ej: 5000"
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-gray-100 focus:outline-none focus:border-emerald-500" />
+            </div>
+            <div className="w-32">
+              <label className="block text-sm text-gray-400 mb-1">Riesgo por entrada</label>
+              <div className="flex items-center gap-1">
+                <input type="number" step="0.1" min="0.01" max="100" value={riskPct}
+                  onChange={e => setRiskPct(e.target.value)}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-gray-100 focus:outline-none focus:border-emerald-500" />
+                <span className="text-gray-400 text-sm">%</span>
+              </div>
+            </div>
+            <button onClick={handleSaveSettings} disabled={savingSettings}
+              className="px-4 py-2 bg-emerald-600 rounded-lg hover:bg-emerald-500 transition disabled:opacity-50 cursor-pointer text-sm whitespace-nowrap">
+              {savingSettings ? 'Guardando...' : settingsSaved ? '✓ Guardado' : 'Guardar'}
+            </button>
+          </div>
+          {parseFloat(balance) > 0 && (
+            <p className="text-xs text-gray-500 mt-2">
+              Riesgo máximo por operación: <span className="text-emerald-400 font-semibold">${(parseFloat(balance) * parseFloat(riskPct) / 100).toFixed(2)}</span>
+              {' '}({riskPct}% de ${parseFloat(balance).toFixed(2)})
+            </p>
+          )}
+        </div>
+
+        {/* NY SESSION BANNER */}
+        {session && (
+          <div className={`rounded-xl border p-4 ${
+            session.alert === 'ny_open' || session.alert === 'ny_active'
+              ? 'bg-emerald-900/20 border-emerald-700'
+              : session.alert === 'ny_close'
+              ? 'bg-yellow-900/20 border-yellow-700'
+              : 'bg-red-900/20 border-red-700'
+          }`}>
+            <div className="flex items-start gap-3">
+              <span className="text-lg shrink-0">
+                {session.in_ny_session ? '🗽' : '⛔'}
+              </span>
+              <div>
+                <p className="text-sm font-medium">
+                  {session.in_ny_session
+                    ? `Sesión NY activa — ${session.current_sessions.join(' / ')}`
+                    : `Fuera de sesión NY — ${session.current_sessions.join(' / ') || 'Mercados cerrados'}`
+                  }
+                </p>
+                <p className={`text-xs mt-1 ${
+                  session.in_ny_session ? 'text-emerald-400' : 'text-red-400'
+                }`}>
+                  {session.message}
+                </p>
+                {session.in_ny_session && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Hora ET: {String(session.hour_et).padStart(2, '0')}:00 · Sesión NY cierra a las 17:00 ET
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {cards.map(({ key, label, suffix, color }) => (

@@ -22,6 +22,20 @@ export function getPrices() {
   return api.get('/prices').then(r => r.data)
 }
 
-export function analyzePair(pair) {
-  return api.get('/analyze', { params: { pair } }).then(r => r.data)
+export function analyzePair(pair, direction) {
+  const params = { pair }
+  if (direction) params.direction = direction
+  return api.get('/analyze', { params }).then(r => r.data)
+}
+
+export function getSettings() {
+  return api.get('/settings').then(r => r.data)
+}
+
+export function updateSettings(data) {
+  return api.put('/settings', data).then(r => r.data)
+}
+
+export function getSession() {
+  return api.get('/session').then(r => r.data)
 }

@@ -57,6 +57,8 @@ export default function TradeCreate() {
   const [priceLoading, setPriceLoading] = useState(true)
   const [priceError, setPriceError] = useState(false)
   const [detecting, setDetecting] = useState(false)
+  const [riskAnalysis, setRiskAnalysis] = useState(null)
+  const [session, setSession] = useState(null)
   const [form, setForm] = useState({
     date: new Date().toISOString().slice(0, 16),
     pair: 'EURUSD',
@@ -83,6 +85,10 @@ export default function TradeCreate() {
       .catch(() => { setPriceError(true); setPriceLoading(false) })
   }, [])
 
+  useEffect(() => {
+    setRiskAnalysis(null)
+  }, [form.pair, form.direction])
+
   function handleChange(e) {
     const { name, value, type, checked } = e.target
     if (type === 'checkbox') {
@@ -97,8 +103,9 @@ export default function TradeCreate() {
 
   async function handleAutoDetect() {
     setDetecting(true)
+    setRiskAnalysis(null)
     try {
-      const result = await analyzePair(form.pair)
+      const result = await analyzePair(form.pair, form.direction)
       const detectedKeys = result.factors.map(f => f.key)
       setForm(prev => ({
         ...prev,
@@ -107,8 +114,23 @@ export default function TradeCreate() {
         setup_notes: `Análisis automático del mercado:\n` +
           result.factors.map(f => `• ${f.label}: ${f.detail}`).join('\n') +
           `\n\nTendencia: ${result.tendency.direction} (${result.tendency.strength})` +
-          `\nPrecio actual: ${result.current_price}`,
+          `\nPrecio actual: ${result.current_price}` +
+          (result.risk_analysis?.rr_ratio
+            ? `\nRR: 1:${result.risk_analysis.rr_ratio} · Lote sugerido: ${result.risk_analysis.suggested_lot_size}`
+            : ''),
       }))
+      if (result.risk_analysis) {
+        setRiskAnalysis(result.risk_analysis)
+        setForm(prev => ({
+          ...prev,
+          stop_loss: String(result.risk_analysis.suggested_sl),
+          take_profit: String(result.risk_analysis.suggested_tp),
+          lot_size: String(result.risk_analysis.suggested_lot_size),
+        }))
+      }
+      if (result.session) {
+        setSession(result.session)
+      }
     } catch {
       alert('Error al analizar. ¿php artisan serve está corriendo?')
     }
@@ -147,6 +169,80 @@ export default function TradeCreate() {
             <p className={`text-sm mt-2 ${confidence.color}`}>{confidence.msg}</p>
           </div>
 
+          {/* RISK ANALYSIS */}
+          {riskAnalysis && (
+            <div className={`rounded-xl border p-5 ${riskAnalysis.verdict_label.bg}`}>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-semibold">Análisis de Riesgo</h2>
+                <span className={`text-xl font-bold ${riskAnalysis.verdict_label.color}`}>
+                  {riskAnalysis.verdict_label.label} · 1:{riskAnalysis.rr_ratio}
+                </span>
+              </div>
+              <p className={`text-sm mb-3 ${riskAnalysis.verdict_label.color}`}>
+                {riskAnalysis.verdict_label.msg}
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                <div className="bg-gray-900/50 rounded-lg p-3 text-center">
+                  <p className="text-gray-500 text-xs">SL Sugerido</p>
+                  <p className="text-red-400 font-mono font-semibold">{riskAnalysis.suggested_sl}</p>
+                  <p className="text-gray-500 text-xs">({riskAnalysis.sl_pips} pips)</p>
+                </div>
+                <div className="bg-gray-900/50 rounded-lg p-3 text-center">
+                  <p className="text-gray-500 text-xs">TP Sugerido</p>
+                  <p className="text-emerald-400 font-mono font-semibold">{riskAnalysis.suggested_tp}</p>
+                  <p className="text-gray-500 text-xs">({riskAnalysis.tp_pips} pips)</p>
+                </div>
+                <div className="bg-gray-900/50 rounded-lg p-3 text-center">
+                  <p className="text-gray-500 text-xs">Lote Sugerido</p>
+                  <p className="text-blue-400 font-bold text-lg">{riskAnalysis.suggested_lot_size}</p>
+                  {riskAnalysis.max_risk_amount && (
+                    <p className="text-gray-500 text-xs">riesgo: ${riskAnalysis.max_risk_amount}</p>
+                  )}
+                </div>
+                <div className="bg-gray-900/50 rounded-lg p-3 text-center">
+                  <p className="text-gray-500 text-xs">Risk/Reward</p>
+                  <p className="text-purple-400 font-bold text-lg">1:{riskAnalysis.rr_ratio}</p>
+                  <p className="text-gray-500 text-xs">{riskAnalysis.sl_pips}/{riskAnalysis.tp_pips} pips</p>
+                </div>
+              </div>
+              {riskAnalysis.account_balance && (
+                <p className="text-xs text-gray-500 mt-2 text-center">
+                  Basado en saldo de ${riskAnalysis.account_balance} · Arriesgando {riskAnalysis.risk_percentage}% (${riskAnalysis.max_risk_amount}) por entrada
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* SESSION BANNER */}
+          {session && (
+            <div className={`rounded-xl border p-4 ${
+              session.alert === 'ny_open' || session.alert === 'ny_active'
+                ? 'bg-emerald-900/20 border-emerald-700'
+                : session.alert === 'ny_close'
+                ? 'bg-yellow-900/20 border-yellow-700'
+                : 'bg-red-900/20 border-red-700'
+            }`}>
+              <div className="flex items-start gap-3">
+                <span className="text-lg shrink-0">
+                  {session.in_ny_session ? '🗽' : '⛔'}
+                </span>
+                <div>
+                  <p className="text-sm font-medium">
+                    {session.in_ny_session
+                      ? `Sesión NY activa — ${session.current_sessions.join(' / ')}`
+                      : `Fuera de sesión NY — ${session.current_sessions.join(' / ') || 'Mercados cerrados'}`
+                    }
+                  </p>
+                  <p className={`text-xs mt-1 ${
+                    session.in_ny_session ? 'text-emerald-400' : 'text-red-400'
+                  }`}>
+                    {session.message}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className={labelClass}>Fecha y Hora</label>
@@ -178,6 +274,9 @@ export default function TradeCreate() {
             <div>
               <label className={labelClass}>Lote</label>
               <input type="number" step="0.01" name="lot_size" value={form.lot_size} onChange={handleChange} className={inputClass} placeholder="0.01" />
+              {riskAnalysis && (
+                <p className="text-xs text-emerald-500 mt-0.5">Sugerido: {riskAnalysis.suggested_lot_size}</p>
+              )}
             </div>
           </div>
 

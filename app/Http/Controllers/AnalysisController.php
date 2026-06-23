@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 
@@ -11,9 +12,11 @@ class AnalysisController extends Controller
     {
         $request->validate([
             'pair' => 'required|string|max:10',
+            'direction' => 'sometimes|in:buy,sell',
         ]);
 
         $pair = $request->pair;
+        $direction = $request->direction ?? 'buy';
 
         $yhCode = $this->toYahooCode($pair);
 
@@ -25,7 +28,7 @@ class AnalysisController extends Controller
         $factors = [];
         $score = 0;
 
-        $sweepResult = $this->detectLiquiditySweep($h1);
+        $sweepResult = $this->detectLiquiditySweep($h1, $direction);
         if ($sweepResult['detected']) {
             $factors[] = [
                 'key' => 'sweep',
@@ -78,6 +81,8 @@ class AnalysisController extends Controller
         $currentPrice = end($h1)['close'];
         $tendency = $this->detectTendency($h1);
 
+        $riskAnalysis = $this->calculateRiskAnalysis($pair, $currentPrice, $direction, $h1);
+
         return response()->json([
             'pair' => $pair,
             'current_price' => $currentPrice,
@@ -86,7 +91,164 @@ class AnalysisController extends Controller
             'factors' => $factors,
             'total_factors' => count($factors),
             'recent_candles' => array_slice($h1, -10),
+            'risk_analysis' => $riskAnalysis,
+            'session' => $this->detectSession(),
         ]);
+    }
+
+    public function session()
+    {
+        return response()->json($this->detectSession());
+    }
+
+    private function calculateRiskAnalysis(string $pair, float $currentPrice, string $direction, array $candles): array
+    {
+        $highs = array_column($candles, 'high');
+        $lows = array_column($candles, 'low');
+        $closes = array_column($candles, 'close');
+
+        $findClusters = function ($values, $threshold) {
+            $clusters = [];
+            foreach ($values as $v) {
+                $found = false;
+                foreach ($clusters as &$cluster) {
+                    if (abs($cluster['price'] - $v) / max($v, 0.0001) < $threshold) {
+                        $cluster['count']++;
+                        $cluster['price'] = ($cluster['price'] + $v) / 2;
+                        $found = true;
+                        break;
+                    }
+                }
+                if (!$found) {
+                    $clusters[] = ['price' => $v, 'count' => 2];
+                }
+            }
+            return array_filter($clusters, fn ($c) => $c['count'] >= 3);
+        };
+
+        $resistanceClusters = $findClusters($highs, 0.002);
+        $supportClusters = $findClusters($lows, 0.002);
+
+        usort($resistanceClusters, fn ($a, $b) => abs($a['price'] - $currentPrice) <=> abs($b['price'] - $currentPrice));
+        usort($supportClusters, fn ($a, $b) => abs($a['price'] - $currentPrice) <=> abs($b['price'] - $currentPrice));
+
+        $nearestResistance = $resistanceClusters[0] ?? null;
+        $nearestSupport = $supportClusters[0] ?? null;
+
+        $suggestedSl = null;
+        $suggestedTp = null;
+        $slReason = '';
+        $tpReason = '';
+
+        if ($direction === 'buy') {
+            if ($nearestSupport) {
+                $suggestedSl = round(min($nearestSupport['price'], $currentPrice * 0.995), 5);
+                $slReason = 'Basado en soporte más cercano';
+            } else {
+                $suggestedSl = round($currentPrice * 0.995, 5);
+                $slReason = 'SL estimado al 0.5% del precio actual';
+            }
+            if ($nearestResistance) {
+                $suggestedTp = round($nearestResistance['price'], 5);
+                $tpReason = 'Basado en resistencia más cercana';
+            } else {
+                $suggestedTp = round($currentPrice * 1.01, 5);
+                $tpReason = 'TP estimado al 1% del precio actual';
+            }
+        } else {
+            if ($nearestResistance) {
+                $suggestedSl = round(max($nearestResistance['price'], $currentPrice * 1.005), 5);
+                $slReason = 'Basado en resistencia más cercana';
+            } else {
+                $suggestedSl = round($currentPrice * 1.005, 5);
+                $slReason = 'SL estimado al 0.5% del precio actual';
+            }
+            if ($nearestSupport) {
+                $suggestedTp = round($nearestSupport['price'], 5);
+                $tpReason = 'Basado en soporte más cercano';
+            } else {
+                $suggestedTp = round($currentPrice * 0.99, 5);
+                $tpReason = 'TP estimado al 1% del precio actual';
+            }
+        }
+
+        $slPips = $this->pipsBetween($currentPrice, $suggestedSl, $pair);
+        $tpPips = $this->pipsBetween($currentPrice, $suggestedTp, $pair);
+
+        $user = User::first();
+        $accountBalance = $user ? (float) $user->account_balance : 0;
+        $riskPercentage = $user ? (float) $user->risk_percentage : 1.0;
+
+        $maxRiskAmount = $accountBalance * ($riskPercentage / 100);
+        $pipValue = $this->estimatePipValue($pair, $currentPrice);
+        $suggestedLotSize = $slPips > 0 ? round($maxRiskAmount / ($slPips * $pipValue), 2) : 0.01;
+        if ($suggestedLotSize < 0.01) $suggestedLotSize = 0.01;
+
+        $rrRatio = $slPips > 0 ? round($tpPips / $slPips, 2) : 0;
+
+        if ($rrRatio >= 2.0) $verdict = 'excelente';
+        elseif ($rrRatio >= 1.5) $verdict = 'buena';
+        elseif ($rrRatio >= 1.0) $verdict = 'regular';
+        else $verdict = 'mala';
+
+        $maxRiskAmountDisplay = $accountBalance > 0
+            ? round($maxRiskAmount, 2)
+            : null;
+
+        return [
+            'suggested_sl' => $suggestedSl,
+            'suggested_tp' => $suggestedTp,
+            'sl_pips' => round($slPips, 1),
+            'tp_pips' => round($tpPips, 1),
+            'sl_reason' => $slReason,
+            'tp_reason' => $tpReason,
+            'rr_ratio' => $rrRatio,
+            'suggested_lot_size' => $suggestedLotSize,
+            'account_balance' => $accountBalance > 0 ? $accountBalance : null,
+            'risk_percentage' => $riskPercentage,
+            'max_risk_amount' => $maxRiskAmountDisplay,
+            'verdict' => $verdict,
+            'verdict_label' => $this->verdictLabel($verdict),
+        ];
+    }
+
+    private function verdictLabel(string $verdict): array
+    {
+        $labels = [
+            'excelente' => ['label' => 'EXCELENTE', 'color' => 'text-emerald-400', 'bg' => 'bg-emerald-900/30', 'msg' => 'RR muy favorable. Entrada con buena relación riesgo/beneficio.'],
+            'buena' => ['label' => 'BUENA', 'color' => 'text-blue-400', 'bg' => 'bg-blue-900/30', 'msg' => 'RR aceptable. Puedes considerar la entrada con gestión de riesgo adecuada.'],
+            'regular' => ['label' => 'REGULAR', 'color' => 'text-yellow-400', 'bg' => 'bg-yellow-900/30', 'msg' => 'RR 1:1 o inferior. Evalúa si realmente vale la pena el riesgo.'],
+            'mala' => ['label' => 'MALA', 'color' => 'text-red-400', 'bg' => 'bg-red-900/30', 'msg' => 'RR desfavorable. Mejor esperar una mejor entrada.'],
+        ];
+        return $labels[$verdict] ?? $labels['mala'];
+    }
+
+    private function pipsBetween(float $price1, float $price2, string $pair): float
+    {
+        $diff = abs($price1 - $price2);
+        if (in_array($pair, ['XAUUSD', 'XAGUSD'])) {
+            return $diff / 0.01;
+        }
+        if (in_array($pair, ['USDJPY', 'EURJPY'])) {
+            return $diff / 0.01;
+        }
+        return $diff / 0.0001;
+    }
+
+    private function estimatePipValue(string $pair, float $currentPrice): float
+    {
+        $values = [
+            'EURUSD' => 10.0,
+            'GBPUSD' => 10.0,
+            'AUDUSD' => 10.0,
+            'NZDUSD' => 10.0,
+            'XAUUSD' => 10.0,
+            'XAGUSD' => 10.0,
+            'USDJPY' => 9.5,
+            'USDCAD' => 7.5,
+            'EURJPY' => 7.0,
+        ];
+        return $values[$pair] ?? 10.0;
     }
 
     private function toYahooCode(string $pair): string
@@ -141,34 +303,53 @@ class AnalysisController extends Controller
         }
     }
 
-    private function detectLiquiditySweep(array $candles): array
+    private function detectLiquiditySweep(array $candles, string $direction = 'buy'): array
     {
         $n = count($candles);
         if ($n < 30) return ['detected' => false, 'detail' => ''];
 
-        $recent = array_slice($candles, -20);
         $lookback = array_slice($candles, -40, 20);
+        $recent = array_slice($candles, -20);
 
         $highs = array_column($lookback, 'high');
         $lows = array_column($lookback, 'low');
 
         $recentHigh = max($highs);
         $recentLow = min($lows);
-        $recentHighIdx = array_search($recentHigh, $highs);
-        $recentLowIdx = array_search($recentLow, $lows);
 
         $last = end($recent);
         $prev = prev($recent);
 
-        if ($prev && $last) {
-            // Sweep above high and reverse down
-            if ($last['high'] > $recentHigh && $last['close'] < $prev['close'] && $last['close'] < $recentHigh) {
-                return ['detected' => true, 'detail' => 'Barrida de máximo ' . round($recentHigh, 5) . ' → reversión bajista'];
+        if (!$prev || !$last) return ['detected' => false, 'detail' => ''];
+
+        $lastHigh = $last['high'];
+        $lastLow = $last['low'];
+        $lastClose = $last['close'];
+
+        if ($direction === 'sell') {
+            if ($lastHigh > $recentHigh && $lastClose < $recentHigh) {
+                return ['detected' => true, 'detail' => 'Barrida de máximo ' . round($recentHigh, 5) . ' → posible reversión bajista'];
             }
-            // Sweep below low and reverse up
-            if ($last['low'] < $recentLow && $last['close'] > $prev['close'] && $last['close'] > $recentLow) {
-                return ['detected' => true, 'detail' => 'Barrida de mínimo ' . round($recentLow, 5) . ' → reversión alcista'];
+            if ($lastLow < $recentLow && $lastClose > $recentLow && $lastClose > $prev['close']) {
+                return ['detected' => true, 'detail' => 'Barrida de mínimo ' . round($recentLow, 5) . ' → posible giro alcista (esperar confirmación bajista)'];
             }
+        }
+
+        if ($direction === 'buy') {
+            if ($lastLow < $recentLow && $lastClose > $recentLow) {
+                return ['detected' => true, 'detail' => 'Barrida de mínimo ' . round($recentLow, 5) . ' → posible reversión alcista'];
+            }
+            if ($lastHigh > $recentHigh && $lastClose < $recentHigh && $lastClose < $prev['close']) {
+                return ['detected' => true, 'detail' => 'Barrida de máximo ' . round($recentHigh, 5) . ' → posible giro bajista (esperar confirmación alcista)'];
+            }
+        }
+
+        // Fallback: detectar cualquier barrida sin filtrar por dirección
+        if ($lastHigh > $recentHigh && $lastClose < $recentHigh && $lastClose < $prev['close']) {
+            return ['detected' => true, 'detail' => 'Barrida de máximo ' . round($recentHigh, 5) . ' → reversión bajista'];
+        }
+        if ($lastLow < $recentLow && $lastClose > $recentLow && $lastClose > $prev['close']) {
+            return ['detected' => true, 'detail' => 'Barrida de mínimo ' . round($recentLow, 5) . ' → reversión alcista'];
         }
 
         return ['detected' => false, 'detail' => ''];
@@ -339,5 +520,57 @@ class AnalysisController extends Controller
             return ['direction' => 'bajista', 'strength' => 'débil'];
         }
         return ['direction' => 'neutral', 'strength' => 'baja'];
+    }
+
+    private function detectSession(): array
+    {
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('America/New_York'));
+        $hour = (int) $now->format('G');
+        $dayOfWeek = (int) $now->format('N');
+        $isWeekend = $dayOfWeek >= 6;
+
+        $isAsian = ($hour >= 19 || $hour < 4);
+        $isLondon = ($hour >= 3 && $hour < 12);
+        $isNY = ($hour >= 8 && $hour < 17);
+
+        $currentSessions = [];
+        if ($isAsian) $currentSessions[] = 'Asiática';
+        if ($isLondon) $currentSessions[] = 'Londres';
+        if ($isNY) $currentSessions[] = 'Nueva York';
+
+        $nyStatus = 'cerrada';
+        $message = '';
+        $alert = null;
+
+        if ($isWeekend) {
+            $message = '⚠️ Fin de semana. Los mercados están cerrados.';
+            $alert = 'warning';
+        } elseif ($isNY) {
+            $nyStatus = 'activa';
+            $hourRemaining = 17 - $hour;
+            if ($hour >= 8 && $hour < 9) {
+                $message = "🗽 Sesión de Nueva York INICIADA — Bienvenida. Hoy te queda toda la sesión para operar.";
+                $alert = 'ny_open';
+            } elseif ($hour >= 16) {
+                $message = "⚠️ Sesión de Nueva York por CERRAR (1 hora restante). Prepara tu salida.";
+                $alert = 'ny_close';
+            } else {
+                $message = "🗽 Sesión de Nueva York ACTIVA — Buen trading. Te quedan {$hourRemaining} horas de sesión.";
+                $alert = 'ny_active';
+            }
+        } else {
+            $message = "⚠️ Ya NO estamos en sesión de Nueva York. Aunque la entrada sea buena, considera esperar a mañana para operar con la sesión NY.";
+            $alert = 'no_ny';
+        }
+
+        return [
+            'current_sessions' => $currentSessions,
+            'in_ny_session' => $isNY,
+            'is_weekend' => $isWeekend,
+            'ny_status' => $nyStatus,
+            'hour_et' => $hour,
+            'message' => $message,
+            'alert' => $alert,
+        ];
     }
 }
