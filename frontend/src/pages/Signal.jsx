@@ -110,10 +110,37 @@ export default function Signal() {
             <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
               <p className="text-sm text-gray-300">{result.message}</p>
               <div className="flex gap-4 mt-3 text-xs text-gray-500">
-                <span>Precio: <span className="text-gray-300 font-mono">{result.current_price}</span></span>
+                <span>Precio actual: <span className="text-gray-300 font-mono">{result.current_price}</span></span>
                 <span>Tendencia: <span className="text-gray-300">{result.tendency.direction} ({result.tendency.strength})</span></span>
               </div>
             </div>
+
+            {result.entry_zone && (
+              <div className="bg-gray-900 rounded-xl border border-emerald-800/50 p-5">
+                <h2 className="text-sm font-semibold text-emerald-400 mb-3">📍 Zona de Entrada Sugerida</h2>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                  <div className="bg-gray-800/50 rounded-lg p-3 text-center">
+                    <p className="text-gray-500 text-xs">Entrada en</p>
+                    <p className="text-emerald-400 font-mono font-bold text-lg">{result.entry_zone.price}</p>
+                    <p className="text-gray-500 text-xs capitalize">{result.entry_zone.type}</p>
+                  </div>
+                  <div className="bg-gray-800/50 rounded-lg p-3 text-center">
+                    <p className="text-gray-500 text-xs">Rango desde</p>
+                    <p className="text-gray-300 font-mono font-semibold">{result.entry_zone.from}</p>
+                    <p className="text-gray-500 text-xs">zona baja</p>
+                  </div>
+                  <div className="bg-gray-800/50 rounded-lg p-3 text-center">
+                    <p className="text-gray-500 text-xs">Rango hasta</p>
+                    <p className="text-gray-300 font-mono font-semibold">{result.entry_zone.to}</p>
+                    <p className="text-gray-500 text-xs">zona alta</p>
+                  </div>
+                  <div className="bg-gray-800/50 rounded-lg p-3 text-center">
+                    <p className="text-gray-500 text-xs">Basado en</p>
+                    <p className="text-emerald-400 font-semibold text-xs">{result.entry_zone.reason}</p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {(result.buy_factors?.length > 0 || result.sell_factors?.length > 0) && (
               <div className="bg-gray-900 rounded-xl border border-gray-800 p-5 space-y-4">

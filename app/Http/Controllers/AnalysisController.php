@@ -198,8 +198,13 @@ class AnalysisController extends Controller
         $totalFactors = count($allFactors);
 
         $riskAnalysis = null;
+        $entryZone = null;
         if ($signal !== 'neutral') {
-            $riskAnalysis = $this->calculateRiskAnalysis($pair, $currentPrice, $signal, $h1);
+            $entryZone = $this->calculateEntryZone($h1, $currentPrice, $signal, $buyFactors, $sellFactors);
+            $riskAnalysis = $this->calculateRiskAnalysis($pair, $entryZone['price'], $signal, $h1);
+            $message = ($entryZone['type'] === 'pullback')
+                ? "Señal de {$action} detectada. Espera {$entryZone['type']} a {$entryZone['price']} para mejor entrada ({$entryZone['reason']})."
+                : "Señal de {$action} detectada. Puedes entrar al mercado en {$currentPrice}.";
         }
 
         return response()->json([
@@ -214,10 +219,177 @@ class AnalysisController extends Controller
             'sell_factors' => $sellFactors,
             'total_factors' => $totalFactors,
             'tendency' => $tendency,
+            'entry_zone' => $entryZone,
             'risk_analysis' => $riskAnalysis,
             'session' => $this->detectSession(),
             'message' => $message,
         ]);
+    }
+
+    private function calculateEntryZone(array $candles, float $currentPrice, string $signal, array $buyFactors, array $sellFactors): array
+    {
+        $isBuy = $signal === 'buy';
+        $highs = array_column($candles, 'high');
+        $lows = array_column($candles, 'low');
+
+        $findClusters = function ($values, $threshold) {
+            $clusters = [];
+            foreach ($values as $v) {
+                $found = false;
+                foreach ($clusters as &$cluster) {
+                    if (abs($cluster['price'] - $v) / max($v, 0.0001) < $threshold) {
+                        $cluster['count']++;
+                        $cluster['price'] = ($cluster['price'] + $v) / 2;
+                        $found = true;
+                        break;
+                    }
+                }
+                if (!$found) {
+                    $clusters[] = ['price' => $v, 'count' => 2];
+                }
+            }
+            return array_filter($clusters, fn ($c) => $c['count'] >= 3);
+        };
+
+        $resistanceClusters = $findClusters($highs, 0.002);
+        $supportClusters = $findClusters($lows, 0.002);
+
+        usort($resistanceClusters, fn ($a, $b) => abs($a['price'] - $currentPrice) <=> abs($b['price'] - $currentPrice));
+        usort($supportClusters, fn ($a, $b) => abs($a['price'] - $currentPrice) <=> abs($b['price'] - $currentPrice));
+
+        $nearestResistance = $resistanceClusters[0] ?? null;
+        $nearestSupport = $supportClusters[0] ?? null;
+
+        $recent15 = array_slice($candles, -15);
+        $recent10 = array_slice($candles, -10);
+
+        $entryPrice = null;
+        $rangeFrom = null;
+        $rangeTo = null;
+        $reasons = [];
+
+        if ($isBuy) {
+            // Priority 1: Bullish Order Block
+            for ($i = 1; $i < count($recent10) - 1; $i++) {
+                $prev = $recent10[$i - 1];
+                $cur = $recent10[$i];
+                $next = $recent10[$i + 1];
+                if ($prev['close'] < $prev['open'] && $cur['close'] > $cur['open'] && $next['close'] > $next['open']) {
+                    if (($cur['close'] - $cur['open']) > abs($prev['close'] - $prev['open']) * 0.5) {
+                        $obLevel = $cur['open'];
+                        if ($obLevel < $currentPrice) {
+                            $entryPrice = round($obLevel, 5);
+                            $rangeFrom = round($obLevel * 0.998, 5);
+                            $rangeTo = round($obLevel * 1.002, 5);
+                            $reasons[] = 'Order Block alcista';
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Priority 2: Bullish FVG
+            if (!$entryPrice) {
+                for ($i = 0; $i < count($recent15) - 2; $i++) {
+                    $c1 = $recent15[$i];
+                    $c2 = $recent15[$i + 1];
+                    $c3 = $recent15[$i + 2];
+                    if ($c1['low'] > $c3['high']) {
+                        $fvgLow = $c3['high'];
+                        $fvgHigh = $c1['low'];
+                        if ($fvgLow < $currentPrice) {
+                            $entryPrice = round(($fvgLow + $fvgHigh) / 2, 5);
+                            $rangeFrom = round($fvgLow, 5);
+                            $rangeTo = round($fvgHigh, 5);
+                            $reasons[] = 'FVG alcista';
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Priority 3: Support level
+            if (!$entryPrice && $nearestSupport && $nearestSupport['price'] < $currentPrice) {
+                $entryPrice = round($nearestSupport['price'], 5);
+                $rangeFrom = round($nearestSupport['price'] * 0.998, 5);
+                $rangeTo = round($nearestSupport['price'] * 1.002, 5);
+                $reasons[] = 'Soporte identificado';
+            }
+
+            // Priority 4: Discount percentage
+            if (!$entryPrice) {
+                $entryPrice = round($currentPrice * 0.997, 5);
+                $rangeFrom = round($currentPrice * 0.995, 5);
+                $rangeTo = round($currentPrice, 5);
+                $reasons[] = 'Zona de descuento estimada';
+            }
+        } else {
+            // SELL
+            // Priority 1: Bearish Order Block
+            for ($i = 1; $i < count($recent10) - 1; $i++) {
+                $prev = $recent10[$i - 1];
+                $cur = $recent10[$i];
+                $next = $recent10[$i + 1];
+                if ($prev['close'] > $prev['open'] && $cur['close'] < $cur['open'] && $next['close'] < $next['open']) {
+                    if (abs($cur['close'] - $cur['open']) > ($prev['close'] - $prev['open']) * 0.5) {
+                        $obLevel = $cur['open'];
+                        if ($obLevel > $currentPrice) {
+                            $entryPrice = round($obLevel, 5);
+                            $rangeFrom = round($obLevel * 0.998, 5);
+                            $rangeTo = round($obLevel * 1.002, 5);
+                            $reasons[] = 'Order Block bajista';
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Priority 2: Bearish FVG
+            if (!$entryPrice) {
+                for ($i = 0; $i < count($recent15) - 2; $i++) {
+                    $c1 = $recent15[$i];
+                    $c2 = $recent15[$i + 1];
+                    $c3 = $recent15[$i + 2];
+                    if ($c1['high'] < $c3['low']) {
+                        $fvgLow = $c1['high'];
+                        $fvgHigh = $c3['low'];
+                        if ($fvgHigh > $currentPrice) {
+                            $entryPrice = round(($fvgLow + $fvgHigh) / 2, 5);
+                            $rangeFrom = round($fvgLow, 5);
+                            $rangeTo = round($fvgHigh, 5);
+                            $reasons[] = 'FVG bajista';
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Priority 3: Resistance level
+            if (!$entryPrice && $nearestResistance && $nearestResistance['price'] > $currentPrice) {
+                $entryPrice = round($nearestResistance['price'], 5);
+                $rangeFrom = round($nearestResistance['price'] * 0.998, 5);
+                $rangeTo = round($nearestResistance['price'] * 1.002, 5);
+                $reasons[] = 'Resistencia identificada';
+            }
+
+            // Priority 4: Premium percentage
+            if (!$entryPrice) {
+                $entryPrice = round($currentPrice * 1.003, 5);
+                $rangeFrom = round($currentPrice, 5);
+                $rangeTo = round($currentPrice * 1.005, 5);
+                $reasons[] = 'Zona de prima estimada';
+            }
+        }
+
+        $entryType = ($entryPrice !== round($currentPrice, 5)) ? 'pullback' : 'market';
+
+        return [
+            'price' => $entryPrice,
+            'type' => $entryType,
+            'from' => $rangeFrom,
+            'to' => $rangeTo,
+            'reason' => implode(' + ', $reasons),
+        ];
     }
 
     public function session()

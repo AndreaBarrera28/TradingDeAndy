@@ -440,8 +440,22 @@ Analiza el mercado en tiempo real sin necesidad de especificar dirección. Detec
 | buy_factors | array | Factores que soportan compra |
 | sell_factors | array | Factores que soportan venta |
 | risk_analysis | object/null | RR, SL/TP sugerido (solo si hay señal clara) |
+| entry_zone | object/null | Zona de entrada sugerida con precio, rango y razón (solo si hay señal clara) |
 
-**Error (502):**
+**Campo `entry_zone`:**
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| price | float | Precio sugerido para entrar |
+| type | string | `pullback` (esperar retroceso) o `market` (entrar ahora) |
+| from | float | Límite inferior del rango de entrada |
+| to | float | Límite superior del rango de entrada |
+| reason | string | Explicación del nivel (Order Block, FVG, Soporte, etc.) |
+
+**Prioridad de selección de entrada:**
+- **Compra:** 1) Order Block alcista → 2) FVG alcista → 3) Soporte → 4) 0.3% descuento
+- **Venta:** 1) Order Block bajista → 2) FVG bajista → 3) Resistencia → 4) 0.3% prima
+
+El `risk_analysis` se calcula usando el precio de `entry_zone.price` como precio de entrada, no el precio actual de mercado.
 ```json
 {
   "error": "No se pudieron obtener datos"
